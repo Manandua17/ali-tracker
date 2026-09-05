@@ -11,8 +11,11 @@
         h1 { text-align: center; color: #2c3e50; }
         .current-rate { font-size: 3.5rem; font-weight: bold; color: #27ae60; text-align: center; margin: 10px 0; }
         .date-label { text-align: center; color: #7f8c8d; font-size: 0.9rem; margin-bottom: 20px; }
-        .filter-container { text-align: right; margin-bottom: 15px; }
-        select { padding: 8px 12px; border-radius: 5px; border: 1px solid #ccc; font-size: 1rem; cursor: pointer; }
+        .filter-container { text-align: right; margin-bottom: 10px; }
+        select, input[type="date"] { padding: 8px 12px; border-radius: 5px; border: 1px solid #ccc; font-size: 1rem; cursor: pointer; font-family: inherit; }
+        #customDateContainer { display: none; text-align: right; margin-bottom: 15px; margin-top: 10px; }
+        button { padding: 9px 15px; border-radius: 5px; border: none; background-color: #2980b9; color: white; font-size: 1rem; cursor: pointer; }
+        button:hover { background-color: #1c5980; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background-color: #f8f9fa; font-weight: 600; }
@@ -37,7 +40,15 @@
             <option value="90">Last 3 Months</option>
             <option value="180">Last 6 Months</option>
             <option value="365">Last 1 Year</option>
+            <option value="custom">Custom Range...</option>
         </select>
+    </div>
+
+    <div id="customDateContainer">
+        <input type="date" id="startDate">
+        <span> to </span>
+        <input type="date" id="endDate">
+        <button id="applyCustomDate">Apply</button>
     </div>
 
     <div class="card">
@@ -62,12 +73,20 @@
         let allData = [];
         let cashbackChart = null;
 
-        // Listen for dropdown changes
         document.getElementById('timeRange').addEventListener('change', function() {
-            updateDashboard(this.value);
+            const customContainer = document.getElementById('customDateContainer');
+            if (this.value === 'custom') {
+                customContainer.style.display = 'block';
+            } else {
+                customContainer.style.display = 'none';
+                updateDashboard(this.value);
+            }
         });
 
-        // Fetch the CSV file dynamically 
+        document.getElementById('applyCustomDate').addEventListener('click', function() {
+            updateDashboard('custom');
+        });
+
         fetch('cashback_history.csv?t=' + new Date().getTime())
             .then(response => {
                 if (!response.ok) throw new Error("CSV not found yet");
@@ -75,15 +94,16 @@
             })
             .then(data => {
                 const rows = data.trim().split('\n');
-                rows.shift(); // Remove the header row
+                rows.shift(); 
                 
-                // Store all data globally
                 rows.forEach(row => {
                     const [date, rate] = row.split(',');
                     if(date && rate) {
+                        // Create valid date format for parsing (replacing space with T if needed)
+                        const isoDateStr = date.replace(' ', 'T');
                         allData.push({
                             dateStr: date,
-                            timestamp: new Date(date).getTime(),
+                            timestamp: new Date(isoDateStr).getTime(),
                             rate: parseFloat(rate)
                         });
                     }
@@ -95,7 +115,6 @@
                     document.getElementById('latestDate').innerText = 'Last updated: ' + latest.dateStr;
                 }
 
-                // Initialize the empty chart instance once
                 const ctx = document.getElementById('cashbackChart').getContext('2d');
                 cashbackChart = new Chart(ctx, {
                     type: 'line',
@@ -114,39 +133,46 @@
                     options: { responsive: true, scales: { y: { beginAtZero: true } } }
                 });
 
-                // Populate the dashboard using the default "all" filter
                 updateDashboard('all');
             })
             .catch(error => { console.log('Waiting for first action run to generate CSV.'); });
 
-        // Function to filter data and update both the chart and table
         function updateDashboard(days) {
             const now = new Date().getTime();
-            let cutoffTime = 0;
+            let startCutoff = 0;
+            let endCutoff = Number.MAX_SAFE_INTEGER;
 
-            if (days !== 'all') {
+            if (days === 'custom') {
+                const startVal = document.getElementById('startDate').value;
+                const endVal = document.getElementById('endDate').value;
+                
+                if (startVal) {
+                    // Append local time start of day
+                    startCutoff = new Date(startVal + 'T00:00:00').getTime();
+                }
+                if (endVal) {
+                    // Append local time end of day
+                    endCutoff = new Date(endVal + 'T23:59:59').getTime();
+                }
+            } else if (days !== 'all') {
                 const daysInMs = parseInt(days) * 24 * 60 * 60 * 1000;
-                cutoffTime = now - daysInMs;
+                startCutoff = now - daysInMs;
             }
 
-            // Filter data based on the calculated timestamp cutoff
-            const filteredData = allData.filter(item => item.timestamp >= cutoffTime);
+            const filteredData = allData.filter(item => item.timestamp >= startCutoff && item.timestamp <= endCutoff);
 
             const dates = filteredData.map(item => item.dateStr);
             const rates = filteredData.map(item => item.rate);
 
-            // Update Chart.js data
             if (cashbackChart) {
                 cashbackChart.data.labels = dates;
                 cashbackChart.data.datasets[0].data = rates;
                 cashbackChart.update();
             }
 
-            // Update HTML Table
             const tableBody = document.getElementById('historyTableBody');
-            tableBody.innerHTML = ''; // Clear current rows
+            tableBody.innerHTML = ''; 
 
-            // Loop backwards so the newest dates remain at the top
             for (let i = filteredData.length - 1; i >= 0; i--) {
                 const item = filteredData[i];
                 const tr = document.createElement('tr');
