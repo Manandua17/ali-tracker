@@ -11,7 +11,9 @@
         h1 { text-align: center; color: #2c3e50; }
         .current-rate { font-size: 3.5rem; font-weight: bold; color: #27ae60; text-align: center; margin: 10px 0; }
         .date-label { text-align: center; color: #7f8c8d; font-size: 0.9rem; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .filter-container { text-align: right; margin-bottom: 15px; }
+        select { padding: 8px 12px; border-radius: 5px; border: 1px solid #ccc; font-size: 1rem; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background-color: #f8f9fa; font-weight: 600; }
         tr:hover { background-color: #f1f2f6; }
@@ -25,6 +27,17 @@
         <h2 style="text-align: center; margin-top: 0;">Current Rakuten Rate</h2>
         <div class="current-rate" id="latestRate">--%</div>
         <div class="date-label" id="latestDate">Awaiting first run...</div>
+    </div>
+
+    <div class="filter-container">
+        <label for="timeRange"><strong>Time Range: </strong></label>
+        <select id="timeRange">
+            <option value="all">All Time</option>
+            <option value="30">Last 30 Days</option>
+            <option value="90">Last 3 Months</option>
+            <option value="180">Last 6 Months</option>
+            <option value="365">Last 1 Year</option>
+        </select>
     </div>
 
     <div class="card">
@@ -46,7 +59,15 @@
     </div>
 
     <script>
-        // Fetches the CSV file dynamically 
+        let allData = [];
+        let cashbackChart = null;
+
+        // Listen for dropdown changes
+        document.getElementById('timeRange').addEventListener('change', function() {
+            updateDashboard(this.value);
+        });
+
+        // Fetch the CSV file dynamically 
         fetch('cashback_history.csv?t=' + new Date().getTime())
             .then(response => {
                 if (!response.ok) throw new Error("CSV not found yet");
@@ -56,37 +77,33 @@
                 const rows = data.trim().split('\n');
                 rows.shift(); // Remove the header row
                 
-                const dates = [];
-                const rates = [];
-                const tableBody = document.getElementById('historyTableBody');
-                
+                // Store all data globally
                 rows.forEach(row => {
                     const [date, rate] = row.split(',');
                     if(date && rate) {
-                        dates.push(date);
-                        rates.push(parseFloat(rate));
-                        
-                        // Prepend to table so newest is on top
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `<td>${date}</td><td>${rate}%</td>`;
-                        tableBody.insertBefore(tr, tableBody.firstChild);
+                        allData.push({
+                            dateStr: date,
+                            timestamp: new Date(date).getTime(),
+                            rate: parseFloat(rate)
+                        });
                     }
                 });
 
-                if (rates.length > 0) {
-                    document.getElementById('latestRate').innerText = rates[rates.length - 1] + '%';
-                    document.getElementById('latestDate').innerText = 'Last updated: ' + dates[dates.length - 1];
+                if (allData.length > 0) {
+                    const latest = allData[allData.length - 1];
+                    document.getElementById('latestRate').innerText = latest.rate + '%';
+                    document.getElementById('latestDate').innerText = 'Last updated: ' + latest.dateStr;
                 }
 
-                // Render Chart.js Graph
+                // Initialize the empty chart instance once
                 const ctx = document.getElementById('cashbackChart').getContext('2d');
-                new Chart(ctx, {
+                cashbackChart = new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: dates,
+                        labels: [],
                         datasets: [{
                             label: 'Cashback Rate (%)',
-                            data: rates,
+                            data: [],
                             borderColor: '#2980b9',
                             backgroundColor: 'rgba(41, 128, 185, 0.2)',
                             borderWidth: 2,
@@ -96,8 +113,47 @@
                     },
                     options: { responsive: true, scales: { y: { beginAtZero: true } } }
                 });
+
+                // Populate the dashboard using the default "all" filter
+                updateDashboard('all');
             })
             .catch(error => { console.log('Waiting for first action run to generate CSV.'); });
+
+        // Function to filter data and update both the chart and table
+        function updateDashboard(days) {
+            const now = new Date().getTime();
+            let cutoffTime = 0;
+
+            if (days !== 'all') {
+                const daysInMs = parseInt(days) * 24 * 60 * 60 * 1000;
+                cutoffTime = now - daysInMs;
+            }
+
+            // Filter data based on the calculated timestamp cutoff
+            const filteredData = allData.filter(item => item.timestamp >= cutoffTime);
+
+            const dates = filteredData.map(item => item.dateStr);
+            const rates = filteredData.map(item => item.rate);
+
+            // Update Chart.js data
+            if (cashbackChart) {
+                cashbackChart.data.labels = dates;
+                cashbackChart.data.datasets[0].data = rates;
+                cashbackChart.update();
+            }
+
+            // Update HTML Table
+            const tableBody = document.getElementById('historyTableBody');
+            tableBody.innerHTML = ''; // Clear current rows
+
+            // Loop backwards so the newest dates remain at the top
+            for (let i = filteredData.length - 1; i >= 0; i--) {
+                const item = filteredData[i];
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${item.dateStr}</td><td>${item.rate}%</td>`;
+                tableBody.appendChild(tr);
+            }
+        }
     </script>
 </body>
 </html>
